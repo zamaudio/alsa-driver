@@ -29,7 +29,7 @@
 #define AMDTP_FDF_SFC_SHIFT	16
 
 /* TODO: make these configurable */
-#if 0 // dz
+#if 1 // dz
 #define INTERRUPT_INTERVAL	24
 #define QUEUE_LENGTH		96
 #else
@@ -53,7 +53,7 @@ int amdtp_stream_init(struct amdtp_stream *s, struct fw_unit *unit,
 	s->packet_index = 0;
 
 	s->data_block_state = 0;
-	s->use_digimagic = false;
+	s->use_digimagic = true;
 
 	return 0;
 }
