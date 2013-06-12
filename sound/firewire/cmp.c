@@ -14,32 +14,43 @@
 #include "iso-resources.h"
 #include "cmp.h"
 
-#define IMPR_SPEED_MASK		0xc0000000
-#define IMPR_SPEED_SHIFT	30
-#define IMPR_XSPEED_MASK	0x00000060
-#define IMPR_XSPEED_SHIFT	5
-#define IMPR_PLUGS_MASK		0x0000001f
+/* MPR common fields */
+#define MPR_SPEED_MASK		0xc0000000
+#define MPR_SPEED_SHIFT		30
+#define MPR_XSPEED_MASK		0x00000060
+#define MPR_XSPEED_SHIFT	5
+#define MPR_PLUGS_MASK		0x0000001f
 
-#define IPCR_ONLINE		0x80000000
-#define IPCR_BCAST_CONN		0x40000000
-#define IPCR_P2P_CONN_MASK	0x3f000000
-#define IPCR_P2P_CONN_SHIFT	24
-#define IPCR_CHANNEL_MASK	0x003f0000
-#define IPCR_CHANNEL_SHIFT	16
+/* PCR common fields */
+#define PCR_ONLINE		0x80000000
+#define PCR_BCAST_CONN		0x40000000
+#define PCR_P2P_CONN_MASK	0x3f000000
+#define PCR_P2P_CONN_SHIFT	24
+#define PCR_CHANNEL_MASK	0x003f0000
+#define PCR_CHANNEL_SHIFT	16
+
+/* oPCR specific fields */
+#define OPCR_DATA_RATE_MASK	0x0000C000
+#define OPCR_DATA_RATE_SHIFT	14
+#define OPCR_OVERHEAD_ID_MASK	0x00003C00
+#define OPCR_OVERHEAD_ID_SHIFT	10
+#define OPCR_PAYLOAD_MASK	0x000003FF
+#define OPCR_PAYLOAD_SHIFT	0
 
 enum bus_reset_handling {
 	ABORT_ON_BUS_RESET,
 	SUCCEED_ON_BUS_RESET,
 };
 
-static __attribute__((format(printf, 2, 3)))
+static __printf(2, 3)
 void cmp_error(struct cmp_connection *c, const char *fmt, ...)
 {
 	va_list va;
 
 	va_start(va, fmt);
 	dev_err(&c->resources.unit->device, "%cPCR%u: %pV",
-		'i', c->pcr_index, &(struct va_format){ fmt, &va });
+		(c->direction == CMP_INPUT) ? 'i': 'o',
+		c->pcr_index, &(struct va_format){ fmt, &va });
 	va_end(va);
 }
 
@@ -48,39 +59,52 @@ static int pcr_modify(struct cmp_connection *c,
 		      int (*check)(struct cmp_connection *c, __be32 pcr),
 		      enum bus_reset_handling bus_reset_handling)
 {
+	struct fw_device *device = fw_parent_device(c->resources.unit);
+	int generation = c->resources.generation;
+	int rcode, errors = 0;
 	__be32 old_arg, buffer[2];
+	unsigned long long offset;
 	int err;
+
+	if (c->direction == CMP_INPUT)
+		offset = CSR_REGISTER_BASE + CSR_IPCR(c->pcr_index);
+	else
+		offset = CSR_REGISTER_BASE + CSR_OPCR(c->pcr_index);
 
 	buffer[0] = c->last_pcr_value;
 	for (;;) {
 		old_arg = buffer[0];
 		buffer[1] = modify(c, buffer[0]);
 
-		err = snd_fw_transaction(
-				c->resources.unit, TCODE_LOCK_COMPARE_SWAP,
-				CSR_REGISTER_BASE + CSR_IPCR(c->pcr_index),
-				buffer, 8,
-				FW_FIXED_GENERATION | c->resources.generation);
+		rcode = fw_run_transaction(
+				device->card, TCODE_LOCK_COMPARE_SWAP,
+				device->node_id, generation, device->max_speed,
+				offset, buffer, 8);
 
-		if (err < 0) {
-			if (err == -EAGAIN &&
-			    bus_reset_handling == SUCCEED_ON_BUS_RESET)
-				err = 0;
-			return err;
-		}
+		if (rcode == RCODE_COMPLETE) {
+			if (buffer[0] == old_arg) /* success? */
+				break;
 
-		if (buffer[0] == old_arg) /* success? */
-			break;
-
-		if (check) {
-			err = check(c, buffer[0]);
-			if (err < 0)
-				return err;
-		}
+			if (check) {
+				err = check(c, buffer[0]);
+				if (err < 0)
+					return err;
+			}
+		} else if (rcode == RCODE_GENERATION)
+			goto bus_reset;
+		else if (rcode_is_permanent_error(rcode) || ++errors >= 3)
+			goto io_error;
 	}
 	c->last_pcr_value = buffer[1];
 
 	return 0;
+
+io_error:
+	cmp_error(c, "transaction failed: 0x%x\n", rcode);
+	return -EIO;
+
+bus_reset:
+	return bus_reset_handling == ABORT_ON_BUS_RESET ? -EAGAIN : 0;
 }
 
 
@@ -92,20 +116,26 @@ static int pcr_modify(struct cmp_connection *c,
  */
 int cmp_connection_init(struct cmp_connection *c,
 			struct fw_unit *unit,
-			unsigned int ipcr_index)
+			enum cmp_direction direction,
+			unsigned int pcr_index)
 {
-	__be32 impr_be;
-	u32 impr;
+	__be32 mpr_be;
+	u32 mpr;
+	unsigned long long offset;
 	int err;
 
+	if (c->direction == CMP_INPUT)
+		offset = CSR_REGISTER_BASE + CSR_IMPR;
+	else
+		offset = CSR_REGISTER_BASE + CSR_OMPR;
+
 	err = snd_fw_transaction(unit, TCODE_READ_QUADLET_REQUEST,
-				 CSR_REGISTER_BASE + CSR_IMPR,
-				 &impr_be, 4, 0);
+				 offset, &mpr_be, 4);
 	if (err < 0)
 		return err;
-	impr = be32_to_cpu(impr_be);
+	mpr = be32_to_cpu(mpr_be);
 
-	if (ipcr_index >= (impr & IMPR_PLUGS_MASK))
+	if (pcr_index >= (mpr & MPR_PLUGS_MASK))
 		return -EINVAL;
 
 	err = fw_iso_resources_init(&c->resources, unit);
@@ -115,10 +145,11 @@ int cmp_connection_init(struct cmp_connection *c,
 	c->connected = false;
 	mutex_init(&c->mutex);
 	c->last_pcr_value = cpu_to_be32(0x80000000);
-	c->pcr_index = ipcr_index;
-	c->max_speed = (impr & IMPR_SPEED_MASK) >> IMPR_SPEED_SHIFT;
+	c->pcr_index = pcr_index;
+	c->max_speed = (mpr & MPR_SPEED_MASK) >> MPR_SPEED_SHIFT;
 	if (c->max_speed == SCODE_BETA)
-		c->max_speed += (impr & IMPR_XSPEED_MASK) >> IMPR_XSPEED_SHIFT;
+		c->max_speed += (mpr & MPR_XSPEED_MASK) >> MPR_XSPEED_SHIFT;
+	c->direction = direction;
 
 	return 0;
 }
@@ -139,23 +170,66 @@ EXPORT_SYMBOL(cmp_connection_destroy);
 
 static __be32 ipcr_set_modify(struct cmp_connection *c, __be32 ipcr)
 {
-	ipcr &= ~cpu_to_be32(IPCR_BCAST_CONN |
-			     IPCR_P2P_CONN_MASK |
-			     IPCR_CHANNEL_MASK);
-	ipcr |= cpu_to_be32(1 << IPCR_P2P_CONN_SHIFT);
-	ipcr |= cpu_to_be32(c->resources.channel << IPCR_CHANNEL_SHIFT);
+	ipcr &= ~cpu_to_be32(PCR_BCAST_CONN |
+			     PCR_P2P_CONN_MASK |
+			     PCR_CHANNEL_MASK);
+	ipcr |= cpu_to_be32(1 << PCR_P2P_CONN_SHIFT);
+	ipcr |= cpu_to_be32(c->resources.channel << PCR_CHANNEL_SHIFT);
 
 	return ipcr;
 }
 
-static int ipcr_set_check(struct cmp_connection *c, __be32 ipcr)
+static int get_overhead_id(struct cmp_connection *c)
 {
-	if (ipcr & cpu_to_be32(IPCR_BCAST_CONN |
-			       IPCR_P2P_CONN_MASK)) {
+	int id;
+
+	/* convert to oPCR overhead ID encoding */
+	/*
+	 * TODO:
+	 * ask the developer about the implementation of current_bandwidth_overhead()
+	 * in iso-resource.c because the return value is sometimes over the range of
+	 * the value which can be encoded by overhead id table (it's 32 to 512).
+	 * Here I use 512 if the value is over the range.
+	 */
+	for (id = 1; id < 16; id += 1) {
+		if (c->resources.bandwidth_overhead < (id << 5))
+			break;
+	}
+	if (id == 16)
+		id = 0;
+
+	return id;
+}
+
+static __be32 opcr_set_modify(struct cmp_connection *c, __be32 opcr)
+{
+	opcr &= ~cpu_to_be32(PCR_BCAST_CONN |
+			     PCR_P2P_CONN_MASK |
+			     PCR_CHANNEL_MASK |
+			     OPCR_DATA_RATE_MASK |
+			     OPCR_OVERHEAD_ID_MASK);
+	opcr |= cpu_to_be32(1 << PCR_P2P_CONN_SHIFT);
+	opcr |= cpu_to_be32(c->resources.channel << PCR_CHANNEL_SHIFT);
+	opcr |= cpu_to_be32(c->speed << OPCR_DATA_RATE_SHIFT);
+	opcr |= cpu_to_be32(get_overhead_id(c) << OPCR_OVERHEAD_ID_SHIFT);
+
+	/*
+	 * TODO:
+	 * investigate the reason that setting payload size is no need here.
+	 * target set it or specification eratta?
+	 */
+
+	return opcr;
+}
+
+static int pcr_set_check(struct cmp_connection *c, __be32 opcr)
+{
+	if (opcr & cpu_to_be32(PCR_BCAST_CONN |
+			       PCR_P2P_CONN_MASK)) {
 		cmp_error(c, "plug is already in use\n");
 		return -EBUSY;
 	}
-	if (!(ipcr & cpu_to_be32(IPCR_ONLINE))) {
+	if (!(opcr & cpu_to_be32(PCR_ONLINE))) {
 		cmp_error(c, "plug is not on-line\n");
 		return -ECONNREFUSED;
 	}
@@ -193,8 +267,13 @@ retry_after_bus_reset:
 	if (err < 0)
 		goto err_mutex;
 
-	err = pcr_modify(c, ipcr_set_modify, ipcr_set_check,
-			 ABORT_ON_BUS_RESET);
+	if (c->direction == CMP_OUTPUT)
+		err = pcr_modify(c, opcr_set_modify, pcr_set_check,
+				 ABORT_ON_BUS_RESET);
+	else
+		err = pcr_modify(c, ipcr_set_modify, pcr_set_check,
+				 ABORT_ON_BUS_RESET);
+
 	if (err == -EAGAIN) {
 		fw_iso_resources_free(&c->resources);
 		goto retry_after_bus_reset;
@@ -242,8 +321,13 @@ int cmp_connection_update(struct cmp_connection *c)
 	if (err < 0)
 		goto err_unconnect;
 
-	err = pcr_modify(c, ipcr_set_modify, ipcr_set_check,
-			 SUCCEED_ON_BUS_RESET);
+	if (c->direction == CMP_OUTPUT)
+		err = pcr_modify(c, opcr_set_modify, pcr_set_check,
+				 SUCCEED_ON_BUS_RESET);
+	else
+		err = pcr_modify(c, ipcr_set_modify, pcr_set_check,
+				 SUCCEED_ON_BUS_RESET);
+
 	if (err < 0)
 		goto err_resources;
 
@@ -262,9 +346,9 @@ err_unconnect:
 EXPORT_SYMBOL(cmp_connection_update);
 
 
-static __be32 ipcr_break_modify(struct cmp_connection *c, __be32 ipcr)
+static __be32 pcr_break_modify(struct cmp_connection *c, __be32 pcr)
 {
-	return ipcr & ~cpu_to_be32(IPCR_BCAST_CONN | IPCR_P2P_CONN_MASK);
+	return pcr & ~cpu_to_be32(PCR_BCAST_CONN | PCR_P2P_CONN_MASK);
 }
 
 /**
@@ -286,7 +370,7 @@ void cmp_connection_break(struct cmp_connection *c)
 		return;
 	}
 
-	err = pcr_modify(c, ipcr_break_modify, NULL, SUCCEED_ON_BUS_RESET);
+	err = pcr_modify(c, pcr_break_modify, NULL, SUCCEED_ON_BUS_RESET);
 	if (err < 0)
 		cmp_error(c, "plug is still connected\n");
 
