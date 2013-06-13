@@ -1,5 +1,5 @@
-snd-003-objs := 003.o 003_proc.o 003_control.o 003_pcm.o \
-		003_midi.o 003_command.o 003_stream.o 003_lowlevel.o 
+snd-003-objs := 003.o 003_pcm.o \
+		003_midi.o 003_stream.o 003_lowlevel.o 
 
 snd-firewire-lib-objs := lib.o iso-resources.o packets-buffer.o \
 			 fcp.o cmp.o digimagic.o amdtp.o 

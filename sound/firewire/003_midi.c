@@ -1,9 +1,9 @@
 /*
- * fireworks_midi.c - driver for Firewire devices from Echo Digital Audio
+ * 003_midi.c - midi driver for Digidesign 003Rack
  *
  * Copyright (c) 2009-2010 Clemens Ladisch
  * Copyright (c) 2013 Takashi Sakamoto
- *
+ * Copyright (c) 2013 Damien Zammit
  *
  * This driver is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.

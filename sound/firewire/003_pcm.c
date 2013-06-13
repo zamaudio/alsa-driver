@@ -1,8 +1,9 @@
 /*
- * fireworks_pcm.c - driver for Firewire devices from Echo Digital Audio
+ * 003_pcm.c - pcm driver for Digidesign 003Rack
  *
  * Copyright (c) 2009-2010 Clemens Ladisch
  * Copyright (c) 2013 Takashi Sakamoto
+ * Copyright (c) 2013 Damien Zammit
  *
  *
  * This driver is free software; you can redistribute it and/or modify
@@ -44,11 +45,11 @@ static unsigned int freq_table[] = {
 	[1] = 48000,
 	[2] = 48000,
 	/* multiplier mode 1 */
-	[3] = 88200,
+	[3] = 96000,
 	[4] = 96000,
 	/* multiplier mode 2 */
-	[5] = 176400,
-	[6] = 192000,
+	[5] = 96000,
+	[6] = 96000,
 };
 
 static int
@@ -216,7 +217,6 @@ static int
 pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_efw_t *efw = substream->private_data;
-	int sampling_rate;
 	int err;
 
 	/* common hardware information */
@@ -268,17 +268,6 @@ pcm_hw_params(struct snd_pcm_substream *substream,
 				params_buffer_bytes(hw_params));
 	if (err < 0)
 		goto end;
-
-	/* set sampling rate if fw isochronous stream is not running */
-	if (!!IS_ERR(efw->transmit_stream.strm.context) ||
-	    !!IS_ERR(efw->receive_stream.strm.context)) {
-		err = snd_efw_command_set_sampling_rate(efw,
-					params_rate(hw_params));
-		if (err < 0)
-			return err;
-		snd_ctl_notify(efw->card, SNDRV_CTL_EVENT_MASK_VALUE,
-					efw->control_id_sampling_rate);
-	}
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		stream = &efw->receive_stream;

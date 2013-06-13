@@ -1,7 +1,8 @@
 /*
- * fireworks.c - driver for Firewire devices from Echo Digital Audio
+ * 003.c - driver for 003Rack by Digidesign
  *
  * Copyright (c) 2009-2010 Clemens Ladisch
+ * Copyright (c) 2013 Damien Zammit
  * Copyright (c) 2013 Takashi Sakamoto
  *
  *
@@ -23,28 +24,13 @@ MODULE_DESCRIPTION("Digidesign 003 Driver");
 MODULE_AUTHOR("Damien Zammit <damien@zamaudio.com>");
 MODULE_LICENSE("GPL v2");
 
-static int index[SNDRV_CARDS]	= SNDRV_DEFAULT_IDX;
-static char *id[SNDRV_CARDS]	= SNDRV_DEFAULT_STR;
-static int enable[SNDRV_CARDS]	= SNDRV_DEFAULT_ENABLE_PNP;
-
-module_param_array(index, int, NULL, 0444);
-MODULE_PARM_DESC(index, "card index");
-module_param_array(id, charp, NULL, 0444);
-MODULE_PARM_DESC(id, "ID string");
-module_param_array(enable, bool, NULL, 0444);
-MODULE_PARM_DESC(enable, "enable Fireworks sound card");
+static int index[SNDRV_CARDS]   = SNDRV_DEFAULT_IDX;
+static char *id[SNDRV_CARDS]    = SNDRV_DEFAULT_STR;
+static int enable[SNDRV_CARDS]  = SNDRV_DEFAULT_ENABLE_PNP;
 
 static DEFINE_MUTEX(devices_mutex);
 static unsigned int devices_used;
 
-/* other flags are unknown... */
-#define FLAG_DYNADDR_SUPPORTED			0
-#define FLAG_MIRRORING_SUPPORTED		1
-#define FLAG_SPDIF_COAX_SUPPORTED		2
-#define FLAG_SPDIF_AES_EBU_XLR_SUPPORTED	3
-#define FLAG_HAS_DSP_MIXER			4
-#define FLAG_HAS_FPGA				5
-#define FLAG_HAS_PHANTOM			6
 static int snd_efw_get_hardware_info(struct snd_efw_t *efw)
 {
 	int err = 0;
@@ -57,31 +43,14 @@ static int snd_efw_get_hardware_info(struct snd_efw_t *efw)
 		err = -ENOMEM;
 		goto end;
 	}
-/*
-	err = snd_efw_command_get_hwinfo(efw, hwinfo);
-	if (err < 0)
-		goto end;
-*/
 	/* capabilities */
-//	if (hwinfo->flags & (1 << FLAG_DYNADDR_SUPPORTED))
 		efw->dynaddr_support = 0;
-//	if (hwinfo->flags & (1 << FLAG_MIRRORING_SUPPORTED))
 		efw->mirroring_support = 0;
-//	if (hwinfo->flags & (1 << FLAG_SPDIF_AES_EBU_XLR_SUPPORTED))
 		efw->aes_ebu_xlr_support = 0;
-//	if (hwinfo->flags & (1 << FLAG_HAS_DSP_MIXER))
 		efw->has_dsp_mixer = 0;
-//	if (hwinfo->flags & (1 << FLAG_HAS_FPGA))
 		efw->has_fpga = 0;
-//	if (hwinfo->flags & (1 << FLAG_HAS_PHANTOM))
 		efw->has_phantom = 0;
-//	if (hwinfo->flags & (1 << FLAG_SPDIF_COAX_SUPPORTED)) {
 		efw->supported_digital_mode = BIT(2) | BIT(3);
-		/* find better way... */
-//		if (strcmp(hwinfo->vendor_name, "AudioFire8a")
-//		 || strcmp(hwinfo->vendor_name, "AudioFirePre8"))
-//			efw->supported_digital_mode |= BIT(0);
-//	}
 
 	hwinfo->nb_out_groups = 1;
 	hwinfo->nb_in_groups = 1;
@@ -121,21 +90,12 @@ static int snd_efw_get_hardware_info(struct snd_efw_t *efw)
 	efw->mixer_output_channels = 18;
 	efw->mixer_input_channels = 18;
 
-	/* TODO: */ 
 	efw->pcm_capture_channels_sets[0] = 18;
 	efw->pcm_capture_channels_sets[1] = 18;
 	efw->pcm_capture_channels_sets[2] = 18;
 	efw->pcm_playback_channels_sets[0] = 18;
 	efw->pcm_playback_channels_sets[1] = 18;
 	efw->pcm_playback_channels_sets[2] = 18;
-
-	/* TODO: check channels */
-
-	/* chip version for firmware */
-//	err = sprintf(version, "%u.%u",
-//		      (hwinfo->arm_version >> 24) & 0xff, (hwinfo->arm_version >> 8) & 0xff);
-//	if (hwinfo->arm_version & 0xff)
-//		sprintf(version + err, ".%u", hwinfo->arm_version & 0xff);
 
 	/* set names */
 	strcpy(efw->card->driver, "003 Rack");
@@ -148,34 +108,7 @@ static int snd_efw_get_hardware_info(struct snd_efw_t *efw)
 
 	/* set flag for supported clock source */
 	efw->supported_clock_source = 0;
-
-	/* set flag for supported sampling rate */
-/*	efw->supported_sampling_rate = 0;
-	if ((hwinfo->min_sample_rate <= 22050)
-	 && (22050 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_22050;
-	if ((hwinfo->min_sample_rate <= 32000)
-	 && (32000 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_32000;
-	if ((hwinfo->min_sample_rate <= 44100)
-	 && (44100 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_44100;
-	if ((hwinfo->min_sample_rate <= 48000)
-	 && (48000 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_48000;
-	if ((hwinfo->min_sample_rate <= 88200)
-	 && (88200 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_88200;
-	if ((hwinfo->min_sample_rate <= 96000)
-	 && (96000 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_96000;
-	if ((hwinfo->min_sample_rate <= 176400)
-	 && (176400 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_176400;
-	if ((hwinfo->min_sample_rate <= 192000)
-	 && (192000 <= hwinfo->max_sample_rate))
-		efw->supported_sampling_rate |= SNDRV_PCM_RATE_192000;
-*/
+	
 	efw->supported_sampling_rate = SNDRV_PCM_RATE_48000;
 	
 	/* MIDI/PCM inputs and outputs */
@@ -283,9 +216,7 @@ static int snd_efw_probe(struct device *dev)
 	mutex_init(&efw->mutex);
 	spin_lock_init(&efw->lock);
 
-	/* identifing */
-	if (snd_efw_command_identify(efw) < 0)
-		goto error_card;
+	/* identifying */
 
 	/* get hardware information */
 	err = snd_efw_get_hardware_info(efw);
@@ -298,12 +229,8 @@ static int snd_efw_probe(struct device *dev)
 		goto error_card;
 
 	/* create proc interface */
-	snd_efw_proc_init(efw);
-
+	
 	/* create hardware control */
-	err = snd_efw_create_control_devices(efw);
-	if (err < 0)
-		goto error_card;
 
 	/* create PCM interface */
 	err = snd_efw_create_pcm_devices(efw);
@@ -355,26 +282,6 @@ static int snd_efw_remove(struct device *dev)
 
 	return 0;
 }
-
-#define VENDOR_GIBSON			0x00075b
-#define  MODEL_GIBSON_RIP		0x00afb2
-/* #define  MODEL_GIBSON_GOLDTOP	0x?????? */
-
-#define VENDOR_LOUD			0x000ff2
-#define  MODEL_MACKIE_400F		0x00400f
-#define  MODEL_MACKIE_1200F		0x01200f
-
-#define VENDOR_ECHO_DIGITAL_AUDIO	0x001486
-#define  MODEL_ECHO_AUDIOFIRE_2		0x000af2
-#define  MODEL_ECHO_AUDIOFIRE_4		0x000af4
-#define  MODEL_ECHO_AUDIOFIRE_8		0x000af8
-/* #define  MODEL_ECHO_AUDIOFIRE_8A	0x?????? */
-/* #define  MODEL_ECHO_AUDIOFIRE_PRE8	0x?????? */
-#define  MODEL_ECHO_AUDIOFIRE_12	0x00af12
-#define  MODEL_ECHO_FIREWORKS_8		0x0000f8
-#define  MODEL_ECHO_FIREWORKS_HDMI	0x00afd1
-
-#define SPECIFIER_1394TA		0x00a02d
 
 #define VENDOR_DIGIDESIGN		0x00a07e
 #define MODEL_ID_003RACK		0x00ab00

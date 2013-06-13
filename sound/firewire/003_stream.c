@@ -1,7 +1,8 @@
 /*
- * fireworks_stream.c - driver for Firewire devices from Echo Digital Audio
+ * 003_stream.c - stream driver for Digidesign 003Rack
  *
  * Copyright (c) 2013 Takashi Sakamoto
+ * Copyright (c) 2013 Damien Zammit
  *
  *
  * This driver is free software; you can redistribute it and/or modify

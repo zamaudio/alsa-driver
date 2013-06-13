@@ -1,5 +1,5 @@
 /*
- * fireworks.h - driver for Firewire devices from Echo Digital Audio
+ * 003.h - driver for Digidesign 003Rack
  *
  * Copyright (c) 2009-2010 Clemens Ladisch
  * Copyright (c) 2013 Takashi Sakamoto
@@ -208,42 +208,6 @@ enum snd_efw_iec60958_format_t {
 	SND_EFW_IEC60958_FORMAT_PROFESSIONAL	= 1
 };
 
-/* Echo Fireworks Command functions */
-/* for phys_in/phys_out/playback/capture/monitor category commands */
-enum snd_efw_mixer_cmd_t {
-	SND_EFW_MIXER_SET_GAIN		= 0,
-	SND_EFW_MIXER_GET_GAIN		= 1,
-	SND_EFW_MIXER_SET_MUTE		= 2,
-	SND_EFW_MIXER_GET_MUTE		= 3,
-	SND_EFW_MIXER_SET_SOLO		= 4,
-	SND_EFW_MIXER_GET_SOLO		= 5,
-	SND_EFW_MIXER_SET_PAN		= 6,
-	SND_EFW_MIXER_GET_PAN		= 7,
-	SND_EFW_MIXER_SET_NOMINAL	= 8,
-	SND_EFW_MIXER_GET_NOMINAL	= 9
-};
-int snd_efw_command_identify(struct snd_efw_t *efw);
-int snd_efw_command_get_hwinfo(void);
-int snd_efw_command_get_phys_meters_count(struct snd_efw_t *efw, int *inputs, int *outputs);
-int snd_efw_command_get_phys_meters(struct snd_efw_t *efw, int count, u32 *polled_meters);
-int snd_efw_command_get_mixer_usable(struct snd_efw_t *efw, int *usable);
-int snd_efw_command_set_mixer_usable(struct snd_efw_t *efw, int usable);
-int snd_efw_command_get_iec60958_format(struct snd_efw_t *efw, enum snd_efw_iec60958_format_t *format);
-int snd_efw_command_set_iec60958_format(struct snd_efw_t *efw, enum snd_efw_iec60958_format_t format);
-int snd_efw_command_get_clock_source(struct snd_efw_t *efw, enum snd_efw_clock_source_t *source);
-int snd_efw_command_set_clock_source(struct snd_efw_t *efw, enum snd_efw_clock_source_t source);
-int snd_efw_command_get_sampling_rate(struct snd_efw_t *efw, int *sampling_rate);
-int snd_efw_command_set_sampling_rate(struct snd_efw_t *efw, int sampling_rate);
-int snd_efw_command_get_digital_mode(struct snd_efw_t *efw, enum snd_efw_digital_mode_t *mode);
-int snd_efw_command_set_digital_mode(struct snd_efw_t *efw, enum snd_efw_digital_mode_t mode);
-int snd_efw_command_get_phantom_state(struct snd_efw_t *efw, int *state);
-int snd_efw_command_set_phantom_state(struct snd_efw_t *efw, int state);
-int snd_efw_command_monitor(struct snd_efw_t *efw, enum snd_efw_mixer_cmd_t cmd, int input, int output, int *value);
-int snd_efw_command_playback(struct snd_efw_t *efw, enum snd_efw_mixer_cmd_t cmd, int channel, int *value);
-int snd_efw_command_phys_out(struct snd_efw_t *efw, enum snd_efw_mixer_cmd_t cmd, int channel, int *value);
-int snd_efw_command_capture(struct snd_efw_t *efw, enum snd_efw_mixer_cmd_t cmd, int channel, int *value);
-int snd_efw_command_phys_in(struct snd_efw_t *efw, enum snd_efw_mixer_cmd_t cmd, int channel, int *value);
-
 /* for AMDTP stream and CMP */
 int snd_efw_stream_init(struct snd_efw_t *efw, struct snd_efw_stream_t *stream);
 int snd_efw_stream_start(struct snd_efw_t *efw, struct snd_efw_stream_t *stream);
@@ -257,10 +221,7 @@ int rack_init(struct snd_efw_t *digi);
 void rack_shutdown(struct snd_efw_t *digi);
 
 /* for procfs subsystem */
-void snd_efw_proc_init(struct snd_efw_t *efw);
-
 /* for control component */
-int snd_efw_create_control_devices(struct snd_efw_t *efw);
 
 /* for midi component */
 int snd_efw_create_midi_devices(struct snd_efw_t *ef);

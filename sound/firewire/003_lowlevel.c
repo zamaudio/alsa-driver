@@ -1,5 +1,5 @@
 /*
- * Digidesign 003Rack driver
+ * 003_lowlevel.c  Digidesign 003Rack driver
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
  * Copyright (C) 2012 Robin Gareus <robin@gareus.org>
