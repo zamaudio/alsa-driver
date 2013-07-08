@@ -54,47 +54,6 @@ get_hardware_info(struct snd_efw *efw)
 		efw->has_fpga = 0;
 		efw->has_phantom = 0;
 
-	hwinfo->nb_out_groups = 1;
-	hwinfo->nb_in_groups = 1;
-
-	/* for input physical metering */
-	if (hwinfo->nb_out_groups > 0) {
-		size = sizeof(struct snd_efw_phys_group) *
-						hwinfo->nb_out_groups;
-		efw->output_groups = kzalloc(size, GFP_KERNEL);
-		if (efw->output_groups == NULL) {
-			err = -ENOMEM;
-			goto error;
-		}
-
-		efw->output_group_counts = 1;
-		for (i = 0; i < efw->output_group_counts; i += 1) {
-			efw->output_groups[i].type = 0;
-			efw->output_groups[i].count = 0;
-		}
-	}
-
-	/* for output physical metering */
-	if (hwinfo->nb_in_groups > 0) {
-		size = sizeof(struct snd_efw_phys_group) *
-						hwinfo->nb_in_groups;
-		efw->input_groups = kzalloc(size, GFP_KERNEL);
-		if (efw->input_groups == NULL) {
-			err = -ENOMEM;
-			goto error;
-		}
-
-		efw->input_group_counts = 1;
-		for (i = 0; i < efw->input_group_counts; i += 1) {
-			efw->input_groups[i].type = 0;
-			efw->input_groups[i].count = 0;
-		}
-	}
-
-	/* for mixer channels */
-	efw->mixer_output_channels = 18;
-	efw->mixer_input_channels = 18;
-
 	efw->pcm_capture_channels[0] = 18;
 	efw->pcm_capture_channels[1] = 18;
 	efw->pcm_capture_channels[2] = 18;
@@ -130,8 +89,6 @@ error:
 static int
 get_hardware_meters_count(struct snd_efw *efw)
 {
-	efw->input_meter_counts = 0;
-	efw->output_meter_counts = 0;
 	return 0;
 }
 
@@ -162,11 +119,6 @@ snd_efw_card_free(struct snd_card *card)
 		devices_used &= ~(1 << efw->card_index);
 		mutex_unlock(&devices_mutex);
 	}
-
-	if (efw->output_group_counts > 0)
-		kfree(efw->output_groups);
-	if (efw->input_group_counts > 0)
-		kfree(efw->input_groups);
 
 	mutex_destroy(&efw->mutex);
 
@@ -210,6 +162,7 @@ snd_efw_probe(struct device *dev)
 	efw->device = fw_parent_device(unit);
 	efw->unit = unit;
 	efw->card_index = -1;
+	efw->dev_lock_count = 0;
 	mutex_init(&efw->mutex);
 	spin_lock_init(&efw->lock);
 

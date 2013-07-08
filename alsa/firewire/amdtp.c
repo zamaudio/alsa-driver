@@ -390,6 +390,17 @@ static void amdtp_write_s32(struct amdtp_stream *s,
 	remaining_frames = runtime->buffer_size - s->pcm_buffer_pointer;
 	frame_step = s->data_block_quadlets - channels;
 
+	for (i = 0; i < frames; ++i) {
+		for (c = 0; c < channels; ++c) {
+			*buffer = cpu_to_be32((*src >> 8) | 0x40000000);
+			src++;
+			buffer++;
+		}
+		buffer += frame_step;
+		if (--remaining_frames == 0)
+			src = (void *)runtime->dma_area;
+	}
+/*
         for (i = 0; i < frames; ++i) {
                 digi_state_reset(&digistate);
                 for (c = 0; c < channels; ++c) {
@@ -404,6 +415,7 @@ static void amdtp_write_s32(struct amdtp_stream *s,
                 if (--remaining_frames == 0)
                         src = (void *)runtime->dma_area;
         }
+*/
 }
 
 static void amdtp_write_s16(struct amdtp_stream *s,

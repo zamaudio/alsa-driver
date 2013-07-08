@@ -31,6 +31,8 @@
 #include <linux/mod_devicetable.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/wait.h>
+#include <linux/spinlock.h>
 
 #include <sound/core.h>
 #include <sound/initval.h>
@@ -56,7 +58,7 @@
 #define HWINFO_NAME_SIZE_BYTES 32
 #define HWINFO_MAX_CAPS_GROUPS 8
 
-/* for physical metering */
+/* for physical metering 
 enum snd_efw_channel_type {
 	SND_EFW_CHANNEL_TYPE_ANALOG		= 0,
 	SND_EFW_CHANNEL_TYPE_SPDIF		= 1,
@@ -66,10 +68,13 @@ enum snd_efw_channel_type {
 	SND_EFW_CHANNEL_TYPE_HEADPHONES		= 5,
 	SND_EFW_CHANNEL_TYPE_I2S		= 6
 };
+*/
+/*
 struct snd_efw_phys_group {
-	u8 type;	/* enum snd_efw_channel_type */
+	u8 type;	// enum snd_efw_channel_type
 	u8 count;
 } __packed;
+*/
 
 struct snd_efw {
 	struct snd_card *card;
@@ -79,6 +84,11 @@ struct snd_efw {
 
 	struct mutex mutex;
 	spinlock_t lock;
+	struct mutex mutexhw;
+	spinlock_t lockhw;
+	wait_queue_head_t hwdep_wait;
+        int dev_lock_count; /* > 0 driver, < 0 userspace */
+        bool dev_lock_changed;
 
 	/* for EFC */
 	u32 seqnum;
@@ -95,18 +105,10 @@ struct snd_efw {
 	unsigned int dynaddr_support;
 
 	/* physical metering */
-	unsigned int input_group_counts;
-	struct snd_efw_phys_group *input_groups;
-	unsigned int output_group_counts;
-	struct snd_efw_phys_group *output_groups;
 
 	/* meter parameters */
-	unsigned int input_meter_counts;
-	unsigned int output_meter_counts;
 
 	/* mixer parameters */
-	unsigned int mixer_input_channels;
-	unsigned int mixer_output_channels;
 
 	/* MIDI parameters */
 	unsigned int midi_input_ports;
@@ -117,50 +119,50 @@ struct snd_efw {
 	unsigned int pcm_playback_channels[SND_EFW_MUITIPLIER_MODES];
 
 	/* notification to control components */
-	struct snd_ctl_elem_id *control_id_sampling_rate;
 
 	/* for IEC 61883-1 and -6 streaming */
 	struct amdtp_stream receive_stream;
 	struct amdtp_stream transmit_stream;
+	
 	/* Fireworks has only two plugs */
 	struct cmp_connection output_connection;
 	struct cmp_connection input_connection;
 };
 
 struct snd_efw_hwinfo {
-	u32 flags;
-	u32 guid_hi;
-	u32 guid_lo;
-	u32 type;
-	u32 version;
+	//u32 flags;
+	//u32 guid_hi;
+	//u32 guid_lo;
+	//u32 type;
+	//u32 version;
 	char vendor_name[HWINFO_NAME_SIZE_BYTES];
 	char model_name[HWINFO_NAME_SIZE_BYTES];
-	u32 supported_clocks;
+	//u32 supported_clocks;
 	u32 nb_1394_playback_channels;
 	u32 nb_1394_capture_channels;
 	u32 nb_phys_audio_out;
 	u32 nb_phys_audio_in;
-	u32 nb_out_groups;
-	struct snd_efw_phys_group out_groups[HWINFO_MAX_CAPS_GROUPS];
-	u32 nb_in_groups;
-	struct snd_efw_phys_group in_groups[HWINFO_MAX_CAPS_GROUPS];
+	//u32 nb_out_groups;
+	//struct snd_efw_phys_group out_groups[HWINFO_MAX_CAPS_GROUPS];
+	//u32 nb_in_groups;
+	//struct snd_efw_phys_group in_groups[HWINFO_MAX_CAPS_GROUPS];
 	u32 nb_midi_out;
 	u32 nb_midi_in;
 	u32 max_sample_rate;
 	u32 min_sample_rate;
-	u32 dsp_version;
-	u32 arm_version;
-	u32 mixer_playback_channels;
-	u32 mixer_capture_channels;
-	u32 fpga_version;
-	u32 nb_1394_playback_channels_2x;
-	u32 nb_1394_capture_channels_2x;
-	u32 nb_1394_playback_channels_4x;
-	u32 nb_1394_capture_channels_4x;
-	u32 reserved[16];
+	//u32 dsp_version;
+	//u32 arm_version;
+	//u32 mixer_playback_channels;
+	//u32 mixer_capture_channels;
+	//u32 fpga_version;
+	//u32 nb_1394_playback_channels_2x;
+	//u32 nb_1394_capture_channels_2x;
+	//u32 nb_1394_playback_channels_4x;
+	//u32 nb_1394_capture_channels_4x;
+	//u32 reserved[16];
 } __packed;
 
-/* for hardware metering */
+/* for hardware metering 
 struct snd_efw_phys_meters {
 	u32 status;
 	u32 detect_spdif;
@@ -173,6 +175,7 @@ struct snd_efw_phys_meters {
 	u32 reserved3;
 	u32 values[0];
 } __packed;
+*/
 
 /* clock source parameters */
 enum snd_efw_clock_source {

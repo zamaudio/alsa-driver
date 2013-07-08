@@ -18,172 +18,93 @@
  * along with this driver; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "003_lowlevel.h"
+#include <linux/spinlock.h>
+#include <linux/wait.h>
 
-/*
- * NOTE:
- * Fireworks changes its PCM channels according to its sampling rate.
- * There are three modes. Here "capture" or "playback" is appplied to XXX.
- *  0:  32.0- 48.0 kHz then snd_efw_hwinfo.nb_1394_XXX_channels    applied
- *  1:  88.2- 96.0 kHz then snd_efw_hwinfo.nb_1394_XXX_channels_2x applied
- *  2: 176.4-192.0 kHz then snd_efw_hwinfo.nb_1394_XXX_channels_4x applied
- *
- * Then the number of PCM channels for analog input and output are always fixed
- * but the number of PCM channels for digital input and output are differed.
- *
- * Additionally, according to "AudioFire Owner's Manual Version 2.2",
- * the number of PCM channels for digital input has more restriction
- * depending on which digital interface is selected.
- *  - S/PDIF coaxial and optical	: use input 1-2
- *  - ADAT optical at 32.0-48.0 kHz	: use input 1-8
- *  - ADAT optical at 88.2-96.0 kHz	: use input 1-4 (S/MUX format)
- * Even if these restriction is applied, the number of channels in AMDTP stream
- * is decided according to above 0/1/2 modes. The needless data is filled with
- * zero.
- *
- * Currently this module doesn't support the latter.
- */
-static unsigned int freq_table[] = {
-	/* multiplier mode 0 */
-	[0] = 48000,
-	[1] = 48000,
-	[2] = 48000,
-	/* multiplier mode 1 */
-	[3] = 96000,
-	[4] = 96000,
-	/* multiplier mode 2 */
-	[5] = 96000,
-	[6] = 96000,
-};
+static DEFINE_MUTEX(devices_mutex);
 
-static inline int
-get_multiplier_mode_with_index(int index)
+static int digi_hw_lock(struct snd_efw *digi)
 {
-	return ((int)index - 1) / 2;
+        int err;
+
+        spin_lock_irq(&digi->lockhw);
+
+        if (digi->dev_lock_count == 0) {
+                digi->dev_lock_count = -1;
+                err = 0;
+        } else {
+                err = -EBUSY;
+        }
+
+        spin_unlock_irq(&digi->lockhw);
+
+        return err;
 }
 
-int snd_efw_get_multiplier_mode(int sampling_rate)
+static int digi_hw_unlock(struct snd_efw *digi)
 {
-	int i;
-	for (i = 0; i < sizeof(freq_table); i += 1)
-		if (freq_table[i] == sampling_rate)
-			return get_multiplier_mode_with_index(i);
+        int err;
 
-	return -1;
+        spin_lock_irq(&digi->lockhw);
+        
+        if (digi->dev_lock_count == -1) {
+                digi->dev_lock_count = 0;
+                err = 0;
+        } else {
+                err = -EBADFD;
+        }
+
+        spin_unlock_irq(&digi->lockhw);
+
+        return err;
+}       
+
+static void digi_lock_changed(struct snd_efw *digi)
+{
+        digi->dev_lock_changed = true;
+        wake_up(&digi->hwdep_wait);
 }
 
-static int
-hw_rule_rate(struct snd_pcm_hw_params *params,
-	     struct snd_pcm_hw_rule *rule,
-	     struct snd_efw *efw, unsigned int *channels)
+static int digi_try_lock(struct snd_efw *digi)
 {
-	struct snd_interval *r =
-		hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
-	const struct snd_interval *c =
-		hw_param_interval_c(params, SNDRV_PCM_HW_PARAM_CHANNELS);
-	struct snd_interval t = {
-		.min = UINT_MAX, .max = 0, .integer = 1
-	};
-	unsigned int rate_bit;
-	int mode, i;
+        int err;
 
-	for (i = 0; i < ARRAY_SIZE(freq_table); i += 1) {
-		/* skip unsupported sampling rate */
-		rate_bit = snd_pcm_rate_to_rate_bit(freq_table[i]);
-		if (!(efw->supported_sampling_rate & rate_bit))
-			continue;
+        spin_lock_irq(&digi->lockhw);
 
-		mode = get_multiplier_mode_with_index(i);
-		if (!snd_interval_test(c, channels[mode]))
-			continue;
+        if (digi->dev_lock_count < 0) {
+                err = -EBUSY;
+                goto out;
+        }
 
-		t.min = min(t.min, freq_table[i]);
-		t.max = max(t.max, freq_table[i]);
+        if (digi->dev_lock_count++ == 0)
+                digi_lock_changed(digi);
+        err = 0;
 
-	}
+out:
+        spin_unlock_irq(&digi->lockhw);
 
-	return snd_interval_refine(r, &t);
+        return err;
 }
 
-static int
-hw_rule_channels(struct snd_pcm_hw_params *params,
-		 struct snd_pcm_hw_rule *rule,
-		 struct snd_efw *efw, unsigned int *channels)
+static void digi_unlock(struct snd_efw *digi)
 {
-	struct snd_interval *c =
-		hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
-	const struct snd_interval *r =
-		hw_param_interval_c(params, SNDRV_PCM_HW_PARAM_RATE);
-	struct snd_interval t = {
-		.min = UINT_MAX, .max = 0, .integer = 1
-	};
+        spin_lock_irq(&digi->lockhw);
 
-	unsigned int rate_bit;
-	int mode, i;
+        if (WARN_ON(digi->dev_lock_count <= 0))
+                goto out;
 
-	for (i = 0; i < ARRAY_SIZE(freq_table); i += 1) {
-		/* skip unsupported sampling rate */
-		rate_bit = snd_pcm_rate_to_rate_bit(freq_table[i]);
-		if (!(efw->supported_sampling_rate & rate_bit))
-			continue;
+        if (--digi->dev_lock_count == 0)
+                digi_lock_changed(digi);
 
-		mode = get_multiplier_mode_with_index(i);
-		if (!snd_interval_test(r, freq_table[i]))
-			continue;
-
-		t.min = min(t.min, channels[mode]);
-		t.max = max(t.max, channels[mode]);
-
-	}
-
-	return snd_interval_refine(c, &t);
-}
-
-static int
-hw_rule_capture_rate(struct snd_pcm_hw_params *params,
-		     struct snd_pcm_hw_rule *rule)
-{
-	struct snd_efw *efw = rule->private;
-	return hw_rule_rate(params, rule, efw,
-				efw->pcm_capture_channels);
-}
-
-static int
-hw_rule_playback_rate(struct snd_pcm_hw_params *params,
-		      struct snd_pcm_hw_rule *rule)
-{
-	struct snd_efw *efw = rule->private;
-	return hw_rule_rate(params, rule, efw,
-				efw->pcm_playback_channels);
-}
-
-static int
-hw_rule_capture_channels(struct snd_pcm_hw_params *params,
-			 struct snd_pcm_hw_rule *rule)
-{
-	struct snd_efw *efw = rule->private;
-	return hw_rule_channels(params, rule, efw,
-				efw->pcm_capture_channels);
-}
-
-static int
-hw_rule_playback_channels(struct snd_pcm_hw_params *params,
-			  struct snd_pcm_hw_rule *rule)
-{
-	struct snd_efw *efw = rule->private;
-	return hw_rule_channels(params, rule, efw,
-				efw->pcm_playback_channels);
+out:
+        spin_unlock_irq(&digi->lockhw);
 }
 
 static int
 pcm_init_hw_params(struct snd_efw *efw,
 		   struct snd_pcm_substream *substream)
 {
-	unsigned int *pcm_channels;
-	unsigned int rate_bit;
-	int mode, i;
-	int err;
-
-	struct snd_pcm_hardware hardware = {
+	static const struct snd_pcm_hardware hardware = {
 		.info = SNDRV_PCM_INFO_MMAP |
 			SNDRV_PCM_INFO_BATCH |
 			SNDRV_PCM_INFO_INTERLEAVED |
@@ -192,11 +113,9 @@ pcm_init_hw_params(struct snd_efw *efw,
 			/* for Open Sound System compatibility */
 			SNDRV_PCM_INFO_MMAP_VALID |
 			SNDRV_PCM_INFO_BLOCK_TRANSFER,
-		.rates = SNDRV_PCM_RATE_48000,
-		.rate_min = 48000,
-		.rate_max = 48000,
-		.channels_min = 19,
-		.channels_max = 19,
+		.formats = SNDRV_PCM_FMTBIT_S32,
+		.channels_min = 18,
+		.channels_max = 18,
 		.buffer_bytes_max = 1024 * 1024 * 1024,
 		.period_bytes_min = 256,
 		.period_bytes_max = 1024 * 1024 * 1024 / 2,
@@ -204,71 +123,56 @@ pcm_init_hw_params(struct snd_efw *efw,
 		.periods_max = 32,
 		.fifo_size = 0,
 	};
+	
+	int err, i;
+	
+	mutex_lock(&efw->mutexhw);
+
+	printk("START HW_PARAMS\n");
+		
+        err = digi_hw_lock(efw);
+        if (err < 0)
+                goto error1;
+	printk("HW LOCK COMPLETE\n");
+       	 
+        //err = digi_hw_unlock(efw);
+        //if (err < 0)
+        //        goto error1;
+	//printk("HW UNLOCK COMPLETE\n");
+	
+	//err = digi_try_lock(efw);
+        //if (err < 0)
+        //        goto error2;
+	//printk("TRY LOCK COMPLETE\n");
 
 	substream->runtime->hw = hardware;
+	printk("HW COMPLETE\n");
+
 	substream->runtime->delay = substream->runtime->hw.fifo_size;
 
-	/* add rule between channels and sampling rate */
-	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
-		substream->runtime->hw.formats = SNDRV_PCM_FMTBIT_S32_LE;
-		snd_pcm_hw_rule_add(substream->runtime, 0,
-				SNDRV_PCM_HW_PARAM_CHANNELS,
-				hw_rule_capture_channels, efw,
-				SNDRV_PCM_HW_PARAM_RATE, -1);
-		snd_pcm_hw_rule_add(substream->runtime, 0,
-				SNDRV_PCM_HW_PARAM_RATE,
-				hw_rule_capture_rate, efw,
-				SNDRV_PCM_HW_PARAM_CHANNELS, -1);
-		pcm_channels = efw->pcm_capture_channels;
-	} else {
-		substream->runtime->hw.formats = AMDTP_OUT_PCM_FORMAT_BITS;
-		snd_pcm_hw_rule_add(substream->runtime, 0,
-				SNDRV_PCM_HW_PARAM_CHANNELS,
-				hw_rule_playback_channels, efw,
-				SNDRV_PCM_HW_PARAM_RATE, -1);
-		snd_pcm_hw_rule_add(substream->runtime, 0,
-				SNDRV_PCM_HW_PARAM_RATE,
-				hw_rule_playback_rate, efw,
-				SNDRV_PCM_HW_PARAM_CHANNELS, -1);
-		pcm_channels = efw->pcm_playback_channels;
-	}
+        //substream->runtime->hw.rates = 0;
+        substream->runtime->hw.rates |= snd_pcm_rate_to_rate_bit(48000);
+        snd_pcm_limit_hw_rates(substream->runtime);
 
-	/* preparing min/max sampling rate */
-	snd_pcm_limit_hw_rates(substream->runtime);
-
-	/* preparing the number of channels */
-	for (i = 0; i < ARRAY_SIZE(freq_table); i += 1) {
-		/* skip unsupported sampling rate */
-		rate_bit = snd_pcm_rate_to_rate_bit(freq_table[i]);
-		if (!(efw->supported_sampling_rate & rate_bit))
-			continue;
-
-		mode = get_multiplier_mode_with_index(i);
-		if (pcm_channels[mode] == 0)
-			continue;
-		substream->runtime->hw.channels_min =
-			min(substream->runtime->hw.channels_min,
-				pcm_channels[mode]);
-		substream->runtime->hw.channels_max =
-			max(substream->runtime->hw.channels_max,
-				pcm_channels[mode]);
-	}
+	substream->runtime->hw.formats = SNDRV_PCM_FMTBIT_S32;
+	substream->runtime->hw.channels_min = 18;
+	substream->runtime->hw.channels_max = 18;
 
 	/* AM824 in IEC 61883-6 can deliver 24bit data */
 	err = snd_pcm_hw_constraint_msbits(substream->runtime, 0, 32, 24);
 	if (err < 0)
 		goto end;
 
-	/* TODO: format of PCM samples is 16bit or 24bit inner 32bit */
+/*
 	err = snd_pcm_hw_constraint_step(substream->runtime, 0,
 				SNDRV_PCM_HW_PARAM_PERIOD_BYTES, 32);
 	if (err < 0)
 		goto end;
-	/* TODO: */
 	err = snd_pcm_hw_constraint_step(substream->runtime, 0,
 				SNDRV_PCM_HW_PARAM_BUFFER_BYTES, 32);
 	if (err < 0)
 		goto end;
+*/
 
 	/* time for period constraint */
 	err = snd_pcm_hw_constraint_minmax(substream->runtime,
@@ -278,9 +182,14 @@ pcm_init_hw_params(struct snd_efw *efw,
 		goto end;
 
 	err = 0;
-
+	printk("END HW_PARAMS");
 end:
-	return err;
+	//digi_unlock(efw);	
+error2:
+        digi_hw_unlock(efw);
+error1:
+	mutex_unlock(&efw->mutexhw);
+        return err;
 }
 
 static int
@@ -288,27 +197,39 @@ pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_efw *efw = substream->private_data;
 	int err;
+	
+	mutex_lock(&devices_mutex);
+
+	printk("START PCM_OPEN\n");
+	
+	mutex_init(&efw->mutexhw);
+	spin_lock_init(&efw->lockhw);
 
 	/* common hardware information */
 	err = pcm_init_hw_params(efw, substream);
 	if (err < 0)
 		goto end;
 
-	efw->pcm_capture_channels[0] = 19;
-	efw->pcm_playback_channels[0] = 19;
-
-	substream->runtime->hw.channels_min = efw->pcm_capture_channels[0];
-	substream->runtime->hw.channels_max = efw->pcm_capture_channels[0];
+	printk("DONE HW_PARAMS\n");
+	
+	substream->runtime->hw.channels_min = 18;
+	substream->runtime->hw.channels_max = 18;
 	substream->runtime->hw.rate_min = 48000;
 	substream->runtime->hw.rate_max = 48000;
 
+	printk("PRE RACK_INIT\n");
 	rack_init(efw);
+	printk("DONE RACK_INIT\n");
 
 	snd_pcm_set_sync(substream);
+	printk("DONE SET_SYNC\n");
 	
 	return 0;
 
 end:
+	mutex_destroy(&efw->mutexhw);
+	mutex_unlock(&devices_mutex);
+	printk("ERROR PCM_OPEN: HW_PARAMS\n");
 	return err;
 }
 
