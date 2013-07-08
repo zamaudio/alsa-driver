@@ -30,8 +30,10 @@
 #define PCR_CHANNEL_SHIFT	16
 
 /* oPCR specific fields */
-#define OPCR_DATA_RATE_MASK	0x0000C000
-#define OPCR_DATA_RATE_SHIFT	14
+#define OPCR_XSPEED_MASK	0x00C00000
+#define OPCR_XSPEED_SHIFT	22
+#define OPCR_SPEED_MASK		0x0000C000
+#define OPCR_SPEED_SHIFT	14
 #define OPCR_OVERHEAD_ID_MASK	0x00003C00
 #define OPCR_OVERHEAD_ID_SHIFT	10
 #define OPCR_PAYLOAD_MASK	0x000003FF
@@ -49,9 +51,28 @@ void cmp_error(struct cmp_connection *c, const char *fmt, ...)
 
 	va_start(va, fmt);
 	dev_err(&c->resources.unit->device, "%cPCR%u: %pV",
-		(c->direction == CMP_INPUT) ? 'i': 'o',
+		(c->direction == CMP_INPUT) ? 'i' : 'o',
 		c->pcr_index, &(struct va_format){ fmt, &va });
 	va_end(va);
+}
+
+static unsigned long long get_offset(struct cmp_connection *c, bool master)
+{
+	unsigned long long offset = CSR_REGISTER_BASE;
+
+	if (!master) {
+		if (c->direction == CMP_INPUT)
+			offset += CSR_IPCR(c->pcr_index);
+		else
+			offset += CSR_OPCR(c->pcr_index);
+	} else {
+		if (c->direction == CMP_INPUT)
+			offset += CSR_IMPR;
+		else
+			offset += CSR_OMPR;
+	}
+
+	return offset;
 }
 
 static int pcr_modify(struct cmp_connection *c,
@@ -63,13 +84,7 @@ static int pcr_modify(struct cmp_connection *c,
 	int generation = c->resources.generation;
 	int rcode, errors = 0;
 	__be32 old_arg, buffer[2];
-	unsigned long long offset;
 	int err;
-
-	if (c->direction == CMP_INPUT)
-		offset = CSR_REGISTER_BASE + CSR_IPCR(c->pcr_index);
-	else
-		offset = CSR_REGISTER_BASE + CSR_OPCR(c->pcr_index);
 
 	buffer[0] = c->last_pcr_value;
 	for (;;) {
@@ -79,7 +94,7 @@ static int pcr_modify(struct cmp_connection *c,
 		rcode = fw_run_transaction(
 				device->card, TCODE_LOCK_COMPARE_SWAP,
 				device->node_id, generation, device->max_speed,
-				offset, buffer, 8);
+				get_offset(c, false), buffer, 8);
 
 		if (rcode == RCODE_COMPLETE) {
 			if (buffer[0] == old_arg) /* success? */
@@ -100,7 +115,7 @@ static int pcr_modify(struct cmp_connection *c,
 	return 0;
 
 io_error:
-	cmp_error(c, "transaction failed: 0x%x\n", rcode);
+	cmp_error(c, "transaction failed: ><\n");// fw_rcode_string(rcode));
 	return -EIO;
 
 bus_reset:
@@ -112,7 +127,7 @@ bus_reset:
  * cmp_connection_init - initializes a connection manager
  * @c: the connection manager to initialize
  * @unit: a unit of the target device
- * @ipcr_index: the index of the iPCR on the target device
+ * @pcr_index: the index of the iPCR/oPCR on the target device
  */
 int cmp_connection_init(struct cmp_connection *c,
 			struct fw_unit *unit,
@@ -121,16 +136,10 @@ int cmp_connection_init(struct cmp_connection *c,
 {
 	__be32 mpr_be;
 	u32 mpr;
-	unsigned long long offset;
 	int err;
 
-	if (c->direction == CMP_INPUT)
-		offset = CSR_REGISTER_BASE + CSR_IMPR;
-	else
-		offset = CSR_REGISTER_BASE + CSR_OMPR;
-
 	err = snd_fw_transaction(unit, TCODE_READ_QUADLET_REQUEST,
-				 offset, &mpr_be, 4);
+				 get_offset(c, true), &mpr_be, 4);
 	if (err < 0)
 		return err;
 	mpr = be32_to_cpu(mpr_be);
@@ -183,19 +192,13 @@ static int get_overhead_id(struct cmp_connection *c)
 {
 	int id;
 
-	/* convert to oPCR overhead ID encoding */
 	/*
-	 * TODO:
-	 * ask the developer about the implementation of current_bandwidth_overhead()
-	 * in iso-resource.c because the return value is sometimes over the range of
-	 * the value which can be encoded by overhead id table (it's 32 to 512).
-	 * Here I use 512 if the value is over the range.
+	 * Apply "oPCR overhead ID encoding"
+	 * The encoding table can convert up to 512.
+	 * Here the value over 512 is converted as the same way as 512.
 	 */
-	for (id = 1; id < 16; id += 1) {
-		if (c->resources.bandwidth_overhead < (id << 5))
-			break;
-	}
-	if (id == 16)
+	id = DIV_ROUND_UP(c->resources.bandwidth_overhead, 32);
+	if (id >= 16)
 		id = 0;
 
 	return id;
@@ -203,33 +206,41 @@ static int get_overhead_id(struct cmp_connection *c)
 
 static __be32 opcr_set_modify(struct cmp_connection *c, __be32 opcr)
 {
+	unsigned int spd, xspd;
+
+	if (c->speed > SCODE_400) {
+		spd  = SCODE_800;
+		xspd = c->speed - SCODE_800;
+	} else {
+		spd = c->speed;
+		xspd = 0;
+	}
+
 	opcr &= ~cpu_to_be32(PCR_BCAST_CONN |
 			     PCR_P2P_CONN_MASK |
+			     OPCR_XSPEED_MASK |
 			     PCR_CHANNEL_MASK |
-			     OPCR_DATA_RATE_MASK |
+			     OPCR_SPEED_MASK |
 			     OPCR_OVERHEAD_ID_MASK);
 	opcr |= cpu_to_be32(1 << PCR_P2P_CONN_SHIFT);
+	opcr |= cpu_to_be32(xspd << OPCR_XSPEED_SHIFT);
 	opcr |= cpu_to_be32(c->resources.channel << PCR_CHANNEL_SHIFT);
-	opcr |= cpu_to_be32(c->speed << OPCR_DATA_RATE_SHIFT);
+	opcr |= cpu_to_be32(spd << OPCR_SPEED_SHIFT);
 	opcr |= cpu_to_be32(get_overhead_id(c) << OPCR_OVERHEAD_ID_SHIFT);
 
-	/*
-	 * TODO:
-	 * investigate the reason that setting payload size is no need here.
-	 * target set it or specification eratta?
-	 */
+	/* NOTE: payload field is set by target device */
 
 	return opcr;
 }
 
-static int pcr_set_check(struct cmp_connection *c, __be32 opcr)
+static int pcr_set_check(struct cmp_connection *c, __be32 pcr)
 {
-	if (opcr & cpu_to_be32(PCR_BCAST_CONN |
+	if (pcr & cpu_to_be32(PCR_BCAST_CONN |
 			       PCR_P2P_CONN_MASK)) {
 		cmp_error(c, "plug is already in use\n");
 		return -EBUSY;
 	}
-	if (!(opcr & cpu_to_be32(PCR_ONLINE))) {
+	if (!(pcr & cpu_to_be32(PCR_ONLINE))) {
 		cmp_error(c, "plug is not on-line\n");
 		return -ECONNREFUSED;
 	}
@@ -244,9 +255,9 @@ static int pcr_set_check(struct cmp_connection *c, __be32 opcr)
  *
  * This function establishes a point-to-point connection from the local
  * computer to the target by allocating isochronous resources (channel and
- * bandwidth) and setting the target's input plug control register.  When this
- * function succeeds, the caller is responsible for starting transmitting
- * packets.
+ * bandwidth) and setting the target's input/output plug control register.
+ * When this function succeeds, the caller is responsible for starting
+ * transmitting packets.
  */
 int cmp_connection_establish(struct cmp_connection *c,
 			     unsigned int max_payload_bytes)
@@ -300,8 +311,8 @@ EXPORT_SYMBOL(cmp_connection_establish);
  * cmp_connection_update - update the connection after a bus reset
  * @c: the connection manager
  *
- * This function must be called from the driver's .update handler to reestablish
- * any connection that might have been active.
+ * This function must be called from the driver's .update handler to
+ * reestablish any connection that might have been active.
  *
  * Returns zero on success, or a negative error code.  On an error, the
  * connection is broken and the caller must stop transmitting iso packets.
@@ -345,7 +356,6 @@ err_unconnect:
 }
 EXPORT_SYMBOL(cmp_connection_update);
 
-
 static __be32 pcr_break_modify(struct cmp_connection *c, __be32 pcr)
 {
 	return pcr & ~cpu_to_be32(PCR_BCAST_CONN | PCR_P2P_CONN_MASK);
@@ -355,9 +365,9 @@ static __be32 pcr_break_modify(struct cmp_connection *c, __be32 pcr)
  * cmp_connection_break - break the connection to the target
  * @c: the connection manager
  *
- * This function deactives the connection in the target's input plug control
- * register, and frees the isochronous resources of the connection.  Before
- * calling this function, the caller should cease transmitting packets.
+ * This function deactives the connection in the target's input/output plug
+ * control register, and frees the isochronous resources of the connection.
+ * Before calling this function, the caller should cease transmitting packets.
  */
 void cmp_connection_break(struct cmp_connection *c)
 {

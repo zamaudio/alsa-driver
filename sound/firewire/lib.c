@@ -44,8 +44,8 @@ int snd_fw_transaction(struct fw_unit *unit, int tcode,
 			return 0;
 
 		if (rcode_is_permanent_error(rcode) || ++tries >= 3) {
-			dev_err(&unit->device, "transaction failed: 0x%x\n",
-				rcode);
+			dev_err(&unit->device, "transaction failed: ><\n");
+				//fw_rcode_string(rcode));
 			return -EIO;
 		}
 
