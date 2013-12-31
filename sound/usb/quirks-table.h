@@ -2493,13 +2493,16 @@ YAMAHA_DEVICE(0x7010, "UB99"),
 	/* MOTU Midi Micro Lite */
         .match_flags = USB_DEVICE_ID_MATCH_VENDOR |
                        USB_DEVICE_ID_MATCH_PRODUCT |
+		       USB_DEVICE_ID_MATCH_INT_SUBCLASS |
                        USB_DEVICE_ID_MATCH_DEV_SUBCLASS,
         .idVendor = 0x07fd,
         .idProduct = 0x0001,
-        .bDeviceSubClass = 3,
+        .bInterfaceClass = 255,
+	.bInterfaceSubClass = 3,
+	.bDeviceSubClass = 3,
         .driver_info = (unsigned long) & (const struct snd_usb_audio_quirk) {
                 .vendor_name = "MOTU",
-                .product_name = "MidiMicroLite",
+                .product_name = "micro lite",
                 .ifnum = QUIRK_ANY_INTERFACE,
 		.type = QUIRK_COMPOSITE,
 		.data = &(const struct snd_usb_audio_quirk[]) {
