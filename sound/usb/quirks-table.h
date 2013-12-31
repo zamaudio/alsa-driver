@@ -2489,6 +2489,35 @@ YAMAHA_DEVICE(0x7010, "UB99"),
 	}
 },
 
+{
+	/* MOTU Midi Micro Lite */
+        .match_flags = USB_DEVICE_ID_MATCH_VENDOR |
+                       USB_DEVICE_ID_MATCH_PRODUCT |
+                       USB_DEVICE_ID_MATCH_DEV_SUBCLASS,
+        .idVendor = 0x07fd,
+        .idProduct = 0x0001,
+        .bDeviceSubClass = 3,
+        .driver_info = (unsigned long) & (const struct snd_usb_audio_quirk) {
+                .vendor_name = "MOTU",
+                .product_name = "MidiMicroLite",
+                .ifnum = QUIRK_ANY_INTERFACE,
+		.type = QUIRK_COMPOSITE,
+		.data = & (const struct snd_usb_audio_quirk[]) {
+			{
+				.ifnum = 1,
+				.type = QUIRK_MIDI_RAW_BYTES
+                                .out_cables = 0x003f,
+				.in_cables = 0x003f,
+				.in_ep = 0x81,
+				.out_ep = 0x02
+			},
+			{
+				.ifnum = -1
+			}
+                }
+        }
+},
+
 /* Emagic devices */
 {
 	USB_DEVICE(0x086a, 0x0001),
@@ -3008,6 +3037,7 @@ YAMAHA_DEVICE(0x7010, "UB99"),
 		}
 	}
 },
+
 {
 	/* Tascam US122 MKII - playback-only support */
 	.match_flags = USB_DEVICE_ID_MATCH_DEVICE,
