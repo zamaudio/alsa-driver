@@ -2500,20 +2500,19 @@ YAMAHA_DEVICE(0x7010, "UB99"),
         .driver_info = (unsigned long) & (const struct snd_usb_audio_quirk) {
                 .vendor_name = "MOTU",
                 .product_name = "MidiMicroLite",
-                .ifnum = QUIRK_ANY_INTERFACE,
+                .ifnum = 1,
 		.type = QUIRK_COMPOSITE,
-		.data = & (const struct snd_usb_audio_quirk[]) {
-			{
-				.ifnum = 1,
-				.type = QUIRK_MIDI_RAW_BYTES
-                                .out_cables = 0x003f,
-				.in_cables = 0x003f,
-				.in_ep = 0x81,
-				.out_ep = 0x02
-			},
-			{
-				.ifnum = -1
-			}
+		.data = &(const struct snd_usb_audio_quirk[]) {
+                        {
+                                .ifnum = 1,
+                                .type = QUIRK_MIDI_RAW_BYTES,
+                                .data = &(const struct snd_usb_midi_endpoint_info) {
+                                        .out_cables = 0x003f,
+                                        .in_cables  = 0x003f,
+					.in_ep = 0x81,
+					.out_ep = 0x02
+                                }
+                        }
                 }
         }
 },
