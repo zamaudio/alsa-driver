@@ -2163,13 +2163,13 @@ int snd_usbmidi_create(struct snd_card *card,
 	case QUIRK_MIDI_US122L:
 		umidi->usb_protocol_ops = &snd_usbmidi_122l_ops;
 		/* fall through */
-	case QUIRK_MIDI_FIXED_ENDPOINT_RAW_BYTES:
-		umidi->usb_protocol_ops = &snd_usbmidi_raw_ops;
+	case QUIRK_MIDI_FIXED_ENDPOINT:
 		memcpy(&endpoints[0], quirk->data,
 		       sizeof(struct snd_usb_midi_endpoint_info));
 		err = snd_usbmidi_detect_endpoints(umidi, &endpoints[0], 1);
 		break;
-	case QUIRK_MIDI_FIXED_ENDPOINT:
+	case QUIRK_MIDI_FIXED_ENDPOINT_RAW_BYTES:
+		umidi->usb_protocol_ops = &snd_usbmidi_raw_ops;
 		memcpy(&endpoints[0], quirk->data,
 		       sizeof(struct snd_usb_midi_endpoint_info));
 		err = snd_usbmidi_detect_endpoints(umidi, &endpoints[0], 1);
