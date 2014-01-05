@@ -2512,8 +2512,9 @@ YAMAHA_DEVICE(0x7010, "UB99"),
 			},
 			{
                                 .ifnum = 1,
-                                .type = QUIRK_MIDI_FIXED_ENDPOINT_RAW_BYTES,
-                                .data = &(const struct snd_usb_midi_endpoint_info) {
+                                .type = QUIRK_MIDI_STANDARD_INTERFACE
+				/*
+				.data = &(const struct snd_usb_midi_endpoint_info) {
                                         .out_cables = 0x001f,
                                         .in_cables  = 0x001f,
 					.in_ep = 0x81,
@@ -2521,6 +2522,7 @@ YAMAHA_DEVICE(0x7010, "UB99"),
 					.in_interval = 0x01,
 					.out_interval = 0x01
                                 }
+				*/
                         },
 			{
 				.ifnum = -1

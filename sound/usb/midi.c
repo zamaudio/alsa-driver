@@ -1591,9 +1591,6 @@ static struct port_info {
 	/* M-Audio MidiSport 8x8 */
 	CONTROL_PORT(0x0763, 0x1031, 8, "%s Control"),
 	CONTROL_PORT(0x0763, 0x1033, 8, "%s Control"),
-	/* MOTU Fastlane */
-	EXTERNAL_PORT(0x07fd, 0x0001, 0, "%s MIDI A"),
-	EXTERNAL_PORT(0x07fd, 0x0001, 1, "%s MIDI B"),
 	/* Emagic Unitor8/AMT8/MT4 */
 	EXTERNAL_PORT(0x086a, 0x0001, 8, "%s Broadcast"),
 	EXTERNAL_PORT(0x086a, 0x0002, 8, "%s Broadcast"),
