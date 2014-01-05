@@ -62,6 +62,7 @@
  * define this to log all USB packets
  */
 /* #define DUMP_PACKETS */
+#define DUMP_PACKETS
 
 /*
  * how long to wait after some USB errors, so that khubd can disconnect() us
