@@ -1863,7 +1863,7 @@ static int snd_usbmidi_detect_endpoints(struct snd_usb_midi* umidi,
 	struct usb_endpoint_descriptor* epd;
 	int i, out_eps = 0, in_eps = 0;
 
-	if (USB_ID_VENDOR(umidi->usb_id) == 0x0582)
+	if (USB_ID_VENDOR(umidi->usb_id) == 0x0582 || USB_ID_VENDOR(umidi->usb_id) == 0x07fd)
 		snd_usbmidi_switch_roland_altsetting(umidi);
 
 	if (endpoint[0].out_ep || endpoint[0].in_ep)
