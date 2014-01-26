@@ -174,6 +174,85 @@ static int create_fixed_stream_quirk(struct snd_usb_audio *chip,
 }
 
 /*
+ * create 2 streams for an interface without proper descriptors but with dual endpoints
+ */
+static int create_fixed_dual_stream_quirk(struct snd_usb_audio *chip,
+				     struct usb_interface *iface,
+				     struct usb_driver *driver,
+				     const struct snd_usb_audio_quirk *quirk)
+{
+	struct audioformat *fp1;
+	struct audioformat *fp2;
+	struct usb_host_interface *alts;
+	int stream1, stream2, err;
+	unsigned *rate_table = NULL;
+
+	fp1 = kmemdup(quirk->data, sizeof(*fp1), GFP_KERNEL);
+	if (!fp1) {
+		snd_printk(KERN_ERR "cannot memdup 1\n");
+		return -ENOMEM;
+	}
+	fp2 = kmemdup(quirk->data2, sizeof(*fp2), GFP_KERNEL);
+	if (!fp2) {
+		snd_printk(KERN_ERR "cannot memdup 2\n");
+		return -ENOMEM;
+	}
+	if (fp1->nr_rates > MAX_NR_RATES) {
+		kfree(fp1);
+		kfree(fp2);
+		return -EINVAL;
+	}
+	// use only first half of quirk to determine rates to ensure consistency
+	if (fp1->nr_rates > 0) {
+		rate_table = kmemdup(fp1->rate_table,
+				     sizeof(int) * fp1->nr_rates, GFP_KERNEL);
+		if (!rate_table) {
+			kfree(fp1);
+			kfree(fp2);
+			return -ENOMEM;
+		}
+		fp1->rate_table = rate_table;
+		fp2->rate_table = rate_table;
+	}
+
+	stream1 = (fp1->endpoint & USB_DIR_IN)
+		? SNDRV_PCM_STREAM_CAPTURE : SNDRV_PCM_STREAM_PLAYBACK;
+	stream2 = (fp2->endpoint & USB_DIR_IN)
+		? SNDRV_PCM_STREAM_CAPTURE : SNDRV_PCM_STREAM_PLAYBACK;
+	err = snd_usb_add_audio_stream(chip, stream1, fp1);
+	if (err < 0) {
+		kfree(fp1);
+		kfree(fp2);
+		kfree(rate_table);
+		return err;
+	}
+	err = snd_usb_add_audio_stream(chip, stream2, fp2);
+	if (err < 0) {
+		kfree(fp1);
+		kfree(fp2);
+		kfree(rate_table);
+		return err;
+	}
+	if (fp1->iface != get_iface_desc(&iface->altsetting[0])->bInterfaceNumber ||
+	    fp1->altset_idx >= iface->num_altsetting ||
+	    fp2->iface != get_iface_desc(&iface->altsetting[0])->bInterfaceNumber ||
+	    fp2->altset_idx >= iface->num_altsetting
+	    ) {
+		kfree(fp1);
+		kfree(fp2);
+		kfree(rate_table);
+		return -EINVAL;
+	}
+	alts = &iface->altsetting[fp1->altset_idx];
+	fp1->datainterval = fp2->datainterval = snd_usb_parse_datainterval(chip, alts);
+	fp1->maxpacksize = fp2->maxpacksize = le16_to_cpu(get_endpoint(alts, 0)->wMaxPacketSize);
+	usb_set_interface(chip->dev, fp1->iface, 0);
+	snd_usb_init_pitch(chip, fp1->iface, alts, fp1);
+	snd_usb_init_sample_rate(chip, fp1->iface, alts, fp1, fp1->rate_max);
+	return 0;
+}
+
+/*
  * Create a stream for an Edirol UA-700/UA-25/UA-4FX interface.  
  * The only way to detect the sample rate is by looking at wMaxPacketSize.
  */
@@ -313,6 +392,7 @@ int snd_usb_create_quirk(struct snd_usb_audio *chip,
 		[QUIRK_MIDI_FTDI] = create_any_midi_quirk,
 		[QUIRK_AUDIO_STANDARD_INTERFACE] = create_standard_audio_quirk,
 		[QUIRK_AUDIO_FIXED_ENDPOINT] = create_fixed_stream_quirk,
+		[QUIRK_AUDIO_FIXED_DUAL_ENDPOINT] = create_fixed_dual_stream_quirk,
 		[QUIRK_AUDIO_EDIROL_UAXX] = create_uaxx_quirk,
 		[QUIRK_AUDIO_ALIGN_TRANSFER] = create_align_transfer_quirk,
 		[QUIRK_AUDIO_STANDARD_MIXER] = create_standard_mixer_quirk,

@@ -84,6 +84,7 @@ enum quirk_type {
 	QUIRK_MIDI_FTDI,
 	QUIRK_AUDIO_STANDARD_INTERFACE,
 	QUIRK_AUDIO_FIXED_ENDPOINT,
+	QUIRK_AUDIO_FIXED_DUAL_ENDPOINT,
 	QUIRK_AUDIO_EDIROL_UAXX,
 	QUIRK_AUDIO_ALIGN_TRANSFER,
 	QUIRK_AUDIO_STANDARD_MIXER,
@@ -97,6 +98,7 @@ struct snd_usb_audio_quirk {
 	int16_t ifnum;
 	uint16_t type;
 	const void *data;
+	const void *data2;
 };
 
 #define combine_word(s)    ((*(s)) | ((unsigned int)(s)[1] << 8))
