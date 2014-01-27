@@ -181,18 +181,17 @@ static int create_fixed_dual_stream_quirk(struct snd_usb_audio *chip,
 				     struct usb_driver *driver,
 				     const struct snd_usb_audio_quirk *quirk)
 {
-	struct audioformat *fp1;
-	struct audioformat *fp2;
+	struct audioformat *fp1, *fp2;
 	struct usb_host_interface *alts;
 	int stream1, stream2, err;
 	unsigned *rate_table = NULL;
 
-	fp1 = kmemdup(quirk->data, sizeof(*fp1), GFP_KERNEL);
+	fp1 = kmemdup((const struct audioformat*)quirk->data, sizeof(*fp1), GFP_KERNEL);
 	if (!fp1) {
 		snd_printk(KERN_ERR "cannot memdup 1\n");
 		return -ENOMEM;
 	}
-	fp2 = kmemdup(quirk->data2, sizeof(*fp2), GFP_KERNEL);
+	fp2 = kmemdup((const struct audioformat*)(quirk->data + sizeof(const struct audioformat)), sizeof(*fp2), GFP_KERNEL);
 	if (!fp2) {
 		snd_printk(KERN_ERR "cannot memdup 2\n");
 		return -ENOMEM;
@@ -202,7 +201,6 @@ static int create_fixed_dual_stream_quirk(struct snd_usb_audio *chip,
 		kfree(fp2);
 		return -EINVAL;
 	}
-	// use only first half of quirk to determine rates to ensure consistency
 	if (fp1->nr_rates > 0) {
 		rate_table = kmemdup(fp1->rate_table,
 				     sizeof(int) * fp1->nr_rates, GFP_KERNEL);

@@ -98,7 +98,6 @@ struct snd_usb_audio_quirk {
 	int16_t ifnum;
 	uint16_t type;
 	const void *data;
-	const void *data2;
 };
 
 #define combine_word(s)    ((*(s)) | ((unsigned int)(s)[1] << 8))
